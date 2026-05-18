@@ -303,10 +303,10 @@ def azure_synthesize(text, voice, path):
             "X-Microsoft-OutputFormat": "audio-48khz-192kbitrate-mono-mp3",
             "User-Agent": "mandarin-tts-app"
         }
-        resp = req.post(tts_url, headers=headers, data=ssml.encode("utf-8"), timeout=180)
+        resp = req.post(tts_url, headers=headers, data=ssml.encode("utf-8"), timeout=180, stream=True)
         if resp.status_code != 200:
             raise Exception(f"Azure REST error {resp.status_code}: {resp.text[:200]}")
-        return resp.content
+        return b"".join(resp.iter_content(chunk_size=8192))
 
     # Split at paragraph breaks every ~3000 chars max
     chunks = chunk_text(text, size=3000)
