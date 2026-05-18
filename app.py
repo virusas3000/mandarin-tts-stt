@@ -116,13 +116,14 @@ async function doTTS() {
   const text = document.getElementById('tts-text').value.trim();
   if (!text) { setStatus('tts', '請輸入文字', 'err'); return; }
   const voice = document.getElementById('voice').value;
-  setStatus('tts', '⏳ 生成中...', 'loading');
+  setStatus('tts', '⏳ 生成中，長文本需要稍等...', 'loading');
   document.querySelector('.btn-primary').disabled = true;
   try {
     const r = await fetch('/tts', {
       method: 'POST',
       headers: {'Content-Type': 'application/json'},
-      body: JSON.stringify({text, voice})
+      body: JSON.stringify({text, voice}),
+      signal: AbortSignal.timeout(120000)
     });
     const d = await r.json();
     if (d.error) throw new Error(d.error);
