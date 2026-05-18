@@ -10,6 +10,10 @@ from flask import Flask, request, jsonify, send_file, render_template_string
 import edge_tts
 import whisper
 from gtts import gTTS
+import azure.cognitiveservices.speech as speechsdk
+
+AZURE_KEY = "REDACTED_AZURE_KEY"
+AZURE_REGION = "eastasia"
 
 app = Flask(__name__)
 AUDIO_DIR = "/tmp/tts_app/audio"
@@ -28,8 +32,14 @@ VOICES = [
     {"id": "edge:zh-CN-XiaochenNeural",  "label": "Edge · 晓辰 Xiaochen (女)"},
     {"id": "edge:zh-TW-HsiaoChenNeural", "label": "Edge · 曉臻 台灣 (女)"},
     {"id": "edge:zh-TW-YunJheNeural",    "label": "Edge · 雲哲 台灣 (男)"},
-    {"id": "gtts:zh-CN",                 "label": "Google TTS · 普通話 (女)"},
-    {"id": "gtts:zh-TW",                 "label": "Google TTS · 台灣普通話 (女)"},
+    {"id": "gtts:zh-CN", "label": "Google TTS · 普通話 (女)"},
+    {"id": "gtts:zh-TW", "label": "Google TTS · 台灣普通話 (女)"},
+    {"id": "azure:zh-CN-YunxiNeural",     "label": "Azure · 云希 Yunxi (男) ⭐"},
+    {"id": "azure:zh-CN-XiaoxiaoNeural",  "label": "Azure · 晓晓 Xiaoxiao (女) ⭐"},
+    {"id": "azure:zh-CN-YunjianNeural",   "label": "Azure · 云健 Yunjian (男)"},
+    {"id": "azure:zh-CN-XiaoyiNeural",    "label": "Azure · 晓伊 Xiaoyi (女)"},
+    {"id": "azure:zh-TW-YunJheNeural",    "label": "Azure · 雲哲 YunJhe (男 台灣)"},
+    {"id": "azure:zh-TW-HsiaoChenNeural", "label": "Azure · 曉臻 HsiaoChen (女 台灣)"},
 ]
 
 HTML = """<!DOCTYPE html>
@@ -259,6 +269,16 @@ def gtts_synthesize(text, lang_code, path):
     tld = "com.tw" if lang_code == "zh-TW" else "com"
     gTTS(text=text, lang="zh", tld=tld).save(path)
 
+def azure_synthesize(text, voice, path):
+    cfg = speechsdk.SpeechConfig(subscription=AZURE_KEY, region=AZURE_REGION)
+    cfg.speech_synthesis_voice_name = voice
+    audio_cfg = speechsdk.audio.AudioOutputConfig(filename=path)
+    synth = speechsdk.SpeechSynthesizer(speech_config=cfg, audio_config=audio_cfg)
+    result = synth.speak_text_async(text).get()
+    if result.reason == speechsdk.ResultReason.Canceled:
+        details = result.cancellation_details
+        raise Exception(f"Azure TTS canceled: {details.error_details}")
+
 @app.route("/tts", methods=["POST"])
 def tts():
     data = request.json
@@ -274,11 +294,12 @@ def tts():
     try:
         if engine == "gtts":
             gtts_synthesize(text, voice_id, path)
+        elif engine == "azure":
+            azure_synthesize(text, voice_id, path)
         else:
             try:
                 asyncio.run(edge_synthesize(text, voice_id, path))
             except Exception:
-                # Fallback to gTTS if edge-tts fails
                 lang = "zh-TW" if "TW" in voice_id else "zh-CN"
                 gtts_synthesize(text, lang, path)
     except Exception as e:
