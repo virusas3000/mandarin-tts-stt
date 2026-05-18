@@ -80,11 +80,10 @@ HTML = """<!DOCTYPE html>
       <option value="{{ v.id }}">{{ v.label }}</option>
       {% endfor %}
     </select>
-    <textarea id="tts-text" placeholder="在這裡輸入普通話文字…&#10;Type Mandarin text here..." maxlength="5000"></textarea>
-    <div class="char-count"><span id="char-num">0</span> / 5000 字</div>
+    <textarea id="tts-text" placeholder="在這裡輸入普通話文字…&#10;Type Mandarin text here..."></textarea>
     <div class="row">
       <button class="btn-primary" onclick="doTTS()">🔊 生成語音</button>
-      <button class="btn-secondary" onclick="document.getElementById('tts-text').value=''; updateCount()">清除</button>
+      <button class="btn-secondary" onclick="document.getElementById('tts-text').value=''">清除</button>
     </div>
     <div class="status" id="tts-status"></div>
     <audio id="tts-audio" controls style="display:none"></audio>
@@ -112,11 +111,6 @@ HTML = """<!DOCTYPE html>
 
 <script>
 let mediaRecorder, audioChunks = [], recordedBlob = null, isRecording = false;
-
-function updateCount() {
-  document.getElementById('char-num').textContent = document.getElementById('tts-text').value.length;
-}
-document.getElementById('tts-text').addEventListener('input', updateCount);
 
 async function doTTS() {
   const text = document.getElementById('tts-text').value.trim();
