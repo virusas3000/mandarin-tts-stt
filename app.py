@@ -5,10 +5,11 @@ Mandarin TTS + STT Web App
 - STT: OpenAI Whisper (local, free)
 """
 
-import asyncio, os, uuid, threading
+import asyncio, os, uuid, threading, re
 from flask import Flask, request, jsonify, send_file, render_template_string
 import edge_tts
 import whisper
+from gtts import gTTS
 
 app = Flask(__name__)
 AUDIO_DIR = "/tmp/tts_app/audio"
@@ -20,13 +21,15 @@ whisper_model = whisper.load_model("base")
 print("Whisper ready.")
 
 VOICES = [
-    {"id": "zh-CN-XiaoxiaoNeural",  "label": "晓晓 Xiaoxiao (女 Female)"},
-    {"id": "zh-CN-YunxiNeural",     "label": "云希 Yunxi (男 Male)"},
-    {"id": "zh-CN-XiaoyiNeural",    "label": "晓伊 Xiaoyi (女 Female)"},
-    {"id": "zh-CN-YunjianNeural",   "label": "云健 Yunjian (男 Male)"},
-    {"id": "zh-CN-XiaochenNeural",  "label": "晓辰 Xiaochen (女 Female)"},
-    {"id": "zh-TW-HsiaoChenNeural", "label": "曉臻 HsiaoChen 台灣 (女 Female)"},
-    {"id": "zh-TW-YunJheNeural",    "label": "雲哲 YunJhe 台灣 (男 Male)"},
+    {"id": "edge:zh-CN-XiaoxiaoNeural",  "label": "Edge · 晓晓 Xiaoxiao (女)"},
+    {"id": "edge:zh-CN-YunxiNeural",     "label": "Edge · 云希 Yunxi (男)"},
+    {"id": "edge:zh-CN-XiaoyiNeural",    "label": "Edge · 晓伊 Xiaoyi (女)"},
+    {"id": "edge:zh-CN-YunjianNeural",   "label": "Edge · 云健 Yunjian (男)"},
+    {"id": "edge:zh-CN-XiaochenNeural",  "label": "Edge · 晓辰 Xiaochen (女)"},
+    {"id": "edge:zh-TW-HsiaoChenNeural", "label": "Edge · 曉臻 台灣 (女)"},
+    {"id": "edge:zh-TW-YunJheNeural",    "label": "Edge · 雲哲 台灣 (男)"},
+    {"id": "gtts:zh-CN",                 "label": "Google TTS · 普通話 (女)"},
+    {"id": "gtts:zh-TW",                 "label": "Google TTS · 台灣普通話 (女)"},
 ]
 
 HTML = """<!DOCTYPE html>
@@ -209,19 +212,60 @@ function setStatus(id, msg, type) {
 def index():
     return render_template_string(HTML, voices=VOICES)
 
+def chunk_text(text, size=500):
+    """Split text into chunks at sentence boundaries."""
+    sentences = re.split(r'(?<=[。！？\.\!\?])', text)
+    chunks, cur = [], ""
+    for s in sentences:
+        if len(cur) + len(s) > size and cur:
+            chunks.append(cur.strip())
+            cur = s
+        else:
+            cur += s
+    if cur.strip():
+        chunks.append(cur.strip())
+    return chunks or [text]
+
+async def edge_synthesize(text, voice, path):
+    chunks = chunk_text(text)
+    if len(chunks) == 1:
+        await edge_tts.Communicate(text, voice).save(path)
+        return
+    # Multiple chunks: generate and concatenate
+    parts = []
+    for i, chunk in enumerate(chunks):
+        p = path + f".part{i}.mp3"
+        await edge_tts.Communicate(chunk, voice).save(p)
+        parts.append(p)
+    # Concatenate by binary concat (works for same-bitrate MP3)
+    with open(path, "wb") as out:
+        for p in parts:
+            with open(p, "rb") as f:
+                out.write(f.read())
+            os.remove(p)
+
 @app.route("/tts", methods=["POST"])
 def tts():
     data = request.json
     text = data.get("text", "").strip()
-    voice = data.get("voice", "zh-CN-XiaoxiaoNeural")
+    voice = data.get("voice", "edge:zh-CN-XiaoxiaoNeural")
     if not text:
         return jsonify({"error": "No text provided"})
     fname = f"{uuid.uuid4().hex}.mp3"
     path = os.path.join(AUDIO_DIR, fname)
-    async def run():
-        c = edge_tts.Communicate(text, voice)
-        await c.save(path)
-    asyncio.run(run())
+
+    engine, voice_id = voice.split(":", 1) if ":" in voice else ("edge", voice)
+
+    try:
+        if engine == "gtts":
+            lang = "zh-CN" if voice_id == "zh-CN" else "zh-TW"
+            tts_obj = gTTS(text=text, lang="zh", tld="com" if lang == "zh-CN" else "com.tw")
+            tts_obj.save(path)
+        else:
+            asyncio.run(edge_synthesize(text, voice_id, path))
+    except Exception as e:
+        return jsonify({"error": str(e)})
+
     return jsonify({"url": f"/audio/{fname}"})
 
 @app.route("/audio/<fname>")
