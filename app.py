@@ -19,6 +19,9 @@ app = Flask(__name__)
 AUDIO_DIR = "/tmp/tts_app/audio"
 os.makedirs(AUDIO_DIR, exist_ok=True)
 
+# Job queue for async TTS
+jobs = {}  # job_id -> {"status": "pending|done|error", "url": ..., "error": ...}
+
 # Load Whisper model once at startup (base is fast, use "small" for better accuracy)
 print("Loading Whisper model...")
 whisper_model = whisper.load_model("base")
@@ -132,20 +135,35 @@ async function doTTS() {
   setStatus('tts', '⏳ 生成中，長文本需要稍等...', 'loading');
   document.querySelector('.btn-primary').disabled = true;
   try {
+    // Submit job
     const r = await fetch('/tts', {
       method: 'POST',
       headers: {'Content-Type': 'application/json'},
-      body: JSON.stringify({text, voice}),
-      signal: AbortSignal.timeout(120000)
+      body: JSON.stringify({text, voice})
     });
     const d = await r.json();
     if (d.error) throw new Error(d.error);
+    const jobId = d.job_id;
+
+    // Poll until done
+    let url = null;
+    for (let i = 0; i < 300; i++) {
+      await new Promise(res => setTimeout(res, 2000));
+      const sr = await fetch('/tts/status/' + jobId);
+      const sd = await sr.json();
+      if (sd.status === 'done') { url = sd.url; break; }
+      if (sd.status === 'error') throw new Error(sd.error);
+      const elapsed = Math.round((i+1)*2);
+      setStatus('tts', `⏳ 生成中... ${elapsed}s`, 'loading');
+    }
+    if (!url) throw new Error('Timeout waiting for audio');
+
     const audio = document.getElementById('tts-audio');
-    audio.src = d.url + '?t=' + Date.now();
+    audio.src = url + '?t=' + Date.now();
     audio.style.display = 'block';
     audio.play();
     const dl = document.getElementById('tts-download');
-    dl.href = d.url;
+    dl.href = url;
     dl.style.display = 'inline-block';
     setStatus('tts', '✅ 完成！', 'ok');
   } catch(e) { setStatus('tts', '❌ ' + e.message, 'err'); }
@@ -270,13 +288,31 @@ def gtts_synthesize(text, lang_code, path):
     gTTS(text=text, lang="zh", tld=tld).save(path)
 
 def azure_synthesize(text, voice, path):
-    cfg = speechsdk.SpeechConfig(subscription=AZURE_KEY, region=AZURE_REGION)
-    cfg.speech_synthesis_voice_name = voice
-    audio_cfg = speechsdk.audio.AudioOutputConfig(filename=path)
-    synth = speechsdk.SpeechSynthesizer(speech_config=cfg, audio_config=audio_cfg)
-    result = synth.speak_text_async(text).get()
-    if result.reason == speechsdk.ResultReason.Canceled:
-        raise Exception(f"Azure TTS canceled: {result.cancellation_details.error_details}")
+    import requests as req, html
+    token_url = f"https://{AZURE_REGION}.api.cognitive.microsoft.com/sts/v1.0/issueToken"
+    token = req.post(token_url, headers={"Ocp-Apim-Subscription-Key": AZURE_KEY}).text
+
+    def _call(chunk):
+        ssml = f"""<speak version='1.0' xml:lang='zh-CN'>
+<voice name='{voice}'>{html.escape(chunk)}</voice>
+</speak>"""
+        tts_url = f"https://{AZURE_REGION}.tts.speech.microsoft.com/cognitiveservices/v1"
+        headers = {
+            "Authorization": f"Bearer {token}",
+            "Content-Type": "application/ssml+xml",
+            "X-Microsoft-OutputFormat": "audio-48khz-192kbitrate-mono-mp3",
+            "User-Agent": "mandarin-tts-app"
+        }
+        resp = req.post(tts_url, headers=headers, data=ssml.encode("utf-8"), timeout=180)
+        if resp.status_code != 200:
+            raise Exception(f"Azure REST error {resp.status_code}: {resp.text[:200]}")
+        return resp.content
+
+    # Split at paragraph breaks every ~3000 chars max
+    chunks = chunk_text(text, size=3000)
+    with open(path, "wb") as f:
+        for chunk in chunks:
+            f.write(_call(chunk))
 
 @app.route("/tts", methods=["POST"])
 def tts():
@@ -285,26 +321,39 @@ def tts():
     voice = data.get("voice", "edge:zh-CN-XiaoxiaoNeural")
     if not text:
         return jsonify({"error": "No text provided"})
-    fname = f"{uuid.uuid4().hex}.mp3"
+
+    job_id = uuid.uuid4().hex
+    fname = f"{job_id}.mp3"
     path = os.path.join(AUDIO_DIR, fname)
+    jobs[job_id] = {"status": "pending"}
 
     engine, voice_id = voice.split(":", 1) if ":" in voice else ("edge", voice)
 
-    try:
-        if engine == "gtts":
-            gtts_synthesize(text, voice_id, path)
-        elif engine == "azure":
-            azure_synthesize(text, voice_id, path)
-        else:
-            try:
-                asyncio.run(edge_synthesize(text, voice_id, path))
-            except Exception:
-                lang = "zh-TW" if "TW" in voice_id else "zh-CN"
-                gtts_synthesize(text, lang, path)
-    except Exception as e:
-        return jsonify({"error": str(e)})
+    def run():
+        try:
+            if engine == "gtts":
+                gtts_synthesize(text, voice_id, path)
+            elif engine == "azure":
+                azure_synthesize(text, voice_id, path)
+            else:
+                try:
+                    asyncio.run(edge_synthesize(text, voice_id, path))
+                except Exception:
+                    lang = "zh-TW" if "TW" in voice_id else "zh-CN"
+                    gtts_synthesize(text, lang, path)
+            jobs[job_id] = {"status": "done", "url": f"/audio/{fname}"}
+        except Exception as e:
+            jobs[job_id] = {"status": "error", "error": str(e)}
 
-    return jsonify({"url": f"/audio/{fname}"})
+    threading.Thread(target=run, daemon=True).start()
+    return jsonify({"job_id": job_id})
+
+@app.route("/tts/status/<job_id>")
+def tts_status(job_id):
+    job = jobs.get(job_id)
+    if not job:
+        return jsonify({"error": "Unknown job"}), 404
+    return jsonify(job)
 
 @app.route("/audio/<fname>")
 def serve_audio(fname):
