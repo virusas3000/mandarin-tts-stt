@@ -272,28 +272,11 @@ def gtts_synthesize(text, lang_code, path):
 def azure_synthesize(text, voice, path):
     cfg = speechsdk.SpeechConfig(subscription=AZURE_KEY, region=AZURE_REGION)
     cfg.speech_synthesis_voice_name = voice
-    chunks = chunk_text(text, size=800)
-    if len(chunks) == 1:
-        audio_cfg = speechsdk.audio.AudioOutputConfig(filename=path)
-        synth = speechsdk.SpeechSynthesizer(speech_config=cfg, audio_config=audio_cfg)
-        result = synth.speak_text_async(text).get()
-        if result.reason == speechsdk.ResultReason.Canceled:
-            raise Exception(f"Azure TTS canceled: {result.cancellation_details.error_details}")
-    else:
-        parts = []
-        for i, chunk in enumerate(chunks):
-            p = path + f".part{i}.mp3"
-            audio_cfg = speechsdk.audio.AudioOutputConfig(filename=p)
-            synth = speechsdk.SpeechSynthesizer(speech_config=cfg, audio_config=audio_cfg)
-            result = synth.speak_text_async(chunk).get()
-            if result.reason == speechsdk.ResultReason.Canceled:
-                raise Exception(f"Azure TTS canceled: {result.cancellation_details.error_details}")
-            parts.append(p)
-        with open(path, "wb") as out:
-            for p in parts:
-                with open(p, "rb") as f:
-                    out.write(f.read())
-                os.remove(p)
+    audio_cfg = speechsdk.audio.AudioOutputConfig(filename=path)
+    synth = speechsdk.SpeechSynthesizer(speech_config=cfg, audio_config=audio_cfg)
+    result = synth.speak_text_async(text).get()
+    if result.reason == speechsdk.ResultReason.Canceled:
+        raise Exception(f"Azure TTS canceled: {result.cancellation_details.error_details}")
 
 @app.route("/tts", methods=["POST"])
 def tts():
