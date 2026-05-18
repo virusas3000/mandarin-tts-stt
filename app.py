@@ -226,23 +226,38 @@ def chunk_text(text, size=500):
         chunks.append(cur.strip())
     return chunks or [text]
 
+async def save_chunk(chunk, voice, path, retries=3):
+    for attempt in range(retries):
+        try:
+            await asyncio.wait_for(
+                edge_tts.Communicate(chunk, voice).save(path),
+                timeout=30
+            )
+            return
+        except Exception:
+            if attempt == retries - 1:
+                raise
+            await asyncio.sleep(2)
+
 async def edge_synthesize(text, voice, path):
     chunks = chunk_text(text)
     if len(chunks) == 1:
-        await edge_tts.Communicate(text, voice).save(path)
+        await save_chunk(text, voice, path)
         return
-    # Multiple chunks: generate and concatenate
     parts = []
     for i, chunk in enumerate(chunks):
         p = path + f".part{i}.mp3"
-        await edge_tts.Communicate(chunk, voice).save(p)
+        await save_chunk(chunk, voice, p)
         parts.append(p)
-    # Concatenate by binary concat (works for same-bitrate MP3)
     with open(path, "wb") as out:
         for p in parts:
             with open(p, "rb") as f:
                 out.write(f.read())
             os.remove(p)
+
+def gtts_synthesize(text, lang_code, path):
+    tld = "com.tw" if lang_code == "zh-TW" else "com"
+    gTTS(text=text, lang="zh", tld=tld).save(path)
 
 @app.route("/tts", methods=["POST"])
 def tts():
@@ -258,11 +273,14 @@ def tts():
 
     try:
         if engine == "gtts":
-            lang = "zh-CN" if voice_id == "zh-CN" else "zh-TW"
-            tts_obj = gTTS(text=text, lang="zh", tld="com" if lang == "zh-CN" else "com.tw")
-            tts_obj.save(path)
+            gtts_synthesize(text, voice_id, path)
         else:
-            asyncio.run(edge_synthesize(text, voice_id, path))
+            try:
+                asyncio.run(edge_synthesize(text, voice_id, path))
+            except Exception:
+                # Fallback to gTTS if edge-tts fails
+                lang = "zh-TW" if "TW" in voice_id else "zh-CN"
+                gtts_synthesize(text, lang, path)
     except Exception as e:
         return jsonify({"error": str(e)})
 
