@@ -12,7 +12,7 @@ import whisper
 from gtts import gTTS
 import azure.cognitiveservices.speech as speechsdk
 
-AZURE_KEY = os.environ.get("AZURE_SPEECH_KEY", "REDACTED_AZURE_KEY")
+AZURE_KEY = os.environ.get("AZURE_SPEECH_KEY", "")
 AZURE_REGION = os.environ.get("AZURE_SPEECH_REGION", "eastasia")
 
 app = Flask(__name__)
