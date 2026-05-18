@@ -288,25 +288,36 @@ def gtts_synthesize(text, lang_code, path):
     gTTS(text=text, lang="zh", tld=tld).save(path)
 
 def azure_synthesize(text, voice, path):
-    import requests as req, html
+    import urllib.request, html as html_mod
     token_url = f"https://{AZURE_REGION}.api.cognitive.microsoft.com/sts/v1.0/issueToken"
-    token = req.post(token_url, headers={"Ocp-Apim-Subscription-Key": AZURE_KEY}).text
+    # token fetched inside _call per chunk
 
     def _call(chunk):
+        import urllib.request
         ssml = f"""<speak version='1.0' xml:lang='zh-CN'>
-<voice name='{voice}'>{html.escape(chunk)}</voice>
+<voice name='{voice}'>{html_mod.escape(chunk)}</voice>
 </speak>"""
-        tts_url = f"https://{AZURE_REGION}.tts.speech.microsoft.com/cognitiveservices/v1"
-        headers = {
-            "Authorization": f"Bearer {token}",
-            "Content-Type": "application/ssml+xml",
-            "X-Microsoft-OutputFormat": "audio-48khz-192kbitrate-mono-mp3",
-            "User-Agent": "mandarin-tts-app"
-        }
-        resp = req.post(tts_url, headers=headers, data=ssml.encode("utf-8"), timeout=180, stream=True)
-        if resp.status_code != 200:
-            raise Exception(f"Azure REST error {resp.status_code}: {resp.text[:200]}")
-        return b"".join(resp.iter_content(chunk_size=8192))
+        token_req = urllib.request.Request(
+            f"https://{AZURE_REGION}.api.cognitive.microsoft.com/sts/v1.0/issueToken",
+            method="POST",
+            headers={"Ocp-Apim-Subscription-Key": AZURE_KEY, "Content-Length": "0"}
+        )
+        with urllib.request.urlopen(token_req) as resp:
+            token = resp.read().decode()
+
+        tts_req = urllib.request.Request(
+            f"https://{AZURE_REGION}.tts.speech.microsoft.com/cognitiveservices/v1",
+            data=ssml.encode("utf-8"),
+            method="POST",
+            headers={
+                "Authorization": f"Bearer {token}",
+                "Content-Type": "application/ssml+xml",
+                "X-Microsoft-OutputFormat": "audio-48khz-192kbitrate-mono-mp3",
+                "User-Agent": "mandarin-tts-app"
+            }
+        )
+        with urllib.request.urlopen(tts_req, timeout=180) as resp:
+            return resp.read()
 
     # Split at paragraph breaks every ~3000 chars max
     chunks = chunk_text(text, size=3000)
