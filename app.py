@@ -317,7 +317,16 @@ def azure_synthesize(text, voice, path):
             }
         )
         with urllib.request.urlopen(tts_req, timeout=180) as resp:
-            return resp.read()
+            chunks_data = []
+            while True:
+                try:
+                    buf = resp.read(65536)
+                except Exception:
+                    break
+                if not buf:
+                    break
+                chunks_data.append(buf)
+            return b"".join(chunks_data)
 
     # Split at paragraph breaks every ~3000 chars max
     chunks = chunk_text(text, size=3000)
