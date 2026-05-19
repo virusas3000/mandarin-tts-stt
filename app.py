@@ -96,6 +96,11 @@ HTML = """<!DOCTYPE html>
       <option value="{{ v.id }}">{{ v.label }}</option>
       {% endfor %}
     </select>
+    <div style="margin:10px 0 4px; display:flex; align-items:center; gap:12px">
+      <label style="color:#aaa; font-size:0.88rem; white-space:nowrap">語速 Speed</label>
+      <input type="range" id="speed" min="0.5" max="2.0" step="0.05" value="1.0" style="flex:1; accent-color:#c9a227">
+      <span id="speed-val" style="color:#c9a227; font-size:0.88rem; width:36px; text-align:right">1.0×</span>
+    </div>
     <textarea id="tts-text" placeholder="在這裡輸入普通話文字…&#10;Type Mandarin text here..."></textarea>
     <div class="row">
       <button class="btn-primary" onclick="doTTS()">🔊 生成語音</button>
@@ -128,10 +133,16 @@ HTML = """<!DOCTYPE html>
 <script>
 let mediaRecorder, audioChunks = [], recordedBlob = null, isRecording = false;
 
+// Speed slider
+document.getElementById('speed').addEventListener('input', function() {
+  document.getElementById('speed-val').textContent = parseFloat(this.value).toFixed(2).replace(/\.?0+$/, '') + '×';
+});
+
 async function doTTS() {
   const text = document.getElementById('tts-text').value.trim();
   if (!text) { setStatus('tts', '請輸入文字', 'err'); return; }
   const voice = document.getElementById('voice').value;
+  const speed = parseFloat(document.getElementById('speed').value);
   setStatus('tts', '⏳ 生成中，長文本需要稍等...', 'loading');
   document.querySelector('.btn-primary').disabled = true;
   try {
@@ -139,7 +150,7 @@ async function doTTS() {
     const r = await fetch('/tts', {
       method: 'POST',
       headers: {'Content-Type': 'application/json'},
-      body: JSON.stringify({text, voice})
+      body: JSON.stringify({text, voice, speed})
     });
     const d = await r.json();
     if (d.error) throw new Error(d.error);
@@ -254,11 +265,11 @@ def chunk_text(text, size=500):
         chunks.append(cur.strip())
     return chunks or [text]
 
-async def save_chunk(chunk, voice, path, retries=3):
+async def save_chunk(chunk, voice, path, retries=3, rate="+0%"):
     for attempt in range(retries):
         try:
             await asyncio.wait_for(
-                edge_tts.Communicate(chunk, voice).save(path),
+                edge_tts.Communicate(chunk, voice, rate=rate).save(path),
                 timeout=30
             )
             return
@@ -267,15 +278,16 @@ async def save_chunk(chunk, voice, path, retries=3):
                 raise
             await asyncio.sleep(2)
 
-async def edge_synthesize(text, voice, path):
+async def edge_synthesize(text, voice, path, speed=1.0):
+    rate = f"{int((speed - 1.0) * 100):+d}%"
     chunks = chunk_text(text)
     if len(chunks) == 1:
-        await save_chunk(text, voice, path)
+        await save_chunk(text, voice, path, rate=rate)
         return
     parts = []
     for i, chunk in enumerate(chunks):
         p = path + f".part{i}.mp3"
-        await save_chunk(chunk, voice, p)
+        await save_chunk(chunk, voice, p, rate=rate)
         parts.append(p)
     with open(path, "wb") as out:
         for p in parts:
@@ -287,15 +299,16 @@ def gtts_synthesize(text, lang_code, path):
     tld = "com.tw" if lang_code == "zh-TW" else "com"
     gTTS(text=text, lang="zh", tld=tld).save(path)
 
-def azure_synthesize(text, voice, path):
+def azure_synthesize(text, voice, path, speed=1.0):
     import urllib.request, html as html_mod
+    rate_pct = f"{int((speed - 1.0) * 100):+d}%"
     token_url = f"https://{AZURE_REGION}.api.cognitive.microsoft.com/sts/v1.0/issueToken"
     # token fetched inside _call per chunk
 
     def _call(chunk):
         import urllib.request
         ssml = f"""<speak version='1.0' xml:lang='zh-CN'>
-<voice name='{voice}'>{html_mod.escape(chunk)}</voice>
+<voice name='{voice}'><prosody rate='{rate_pct}'>{html_mod.escape(chunk)}</prosody></voice>
 </speak>"""
         token_req = urllib.request.Request(
             f"https://{AZURE_REGION}.api.cognitive.microsoft.com/sts/v1.0/issueToken",
@@ -339,6 +352,8 @@ def tts():
     data = request.json
     text = data.get("text", "").strip()
     voice = data.get("voice", "edge:zh-CN-XiaoxiaoNeural")
+    speed = float(data.get("speed", 1.0))
+    speed = max(0.5, min(2.0, speed))
     if not text:
         return jsonify({"error": "No text provided"})
 
@@ -354,10 +369,10 @@ def tts():
             if engine == "gtts":
                 gtts_synthesize(text, voice_id, path)
             elif engine == "azure":
-                azure_synthesize(text, voice_id, path)
+                azure_synthesize(text, voice_id, path, speed=speed)
             else:
                 try:
-                    asyncio.run(edge_synthesize(text, voice_id, path))
+                    asyncio.run(edge_synthesize(text, voice_id, path, speed=speed))
                 except Exception:
                     lang = "zh-TW" if "TW" in voice_id else "zh-CN"
                     gtts_synthesize(text, lang, path)
