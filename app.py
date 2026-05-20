@@ -41,6 +41,7 @@ VOICES = [
     {"id": "azure:zh-CN-XiaoxiaoNeural",  "label": "Azure · 晓晓 Xiaoxiao (女) ⭐"},
     {"id": "azure:zh-CN-YunjianNeural",   "label": "Azure · 云健 Yunjian (男)"},
     {"id": "azure:zh-CN-YunhaoNeural",    "label": "Azure · 云皓 Yunhao (男)"},
+    {"id": "azure:zh-CN-YunxiaNeural",    "label": "Azure · 云夏 Yunxia (男)"},
     {"id": "azure:zh-CN-XiaoyiNeural",    "label": "Azure · 晓伊 Xiaoyi (女)"},
     {"id": "azure:zh-TW-YunJheNeural",    "label": "Azure · 雲哲 YunJhe (男 台灣)"},
     {"id": "azure:zh-TW-HsiaoChenNeural", "label": "Azure · 曉臻 HsiaoChen (女 台灣)"},
