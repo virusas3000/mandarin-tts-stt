@@ -40,6 +40,7 @@ VOICES = [
     {"id": "azure:zh-CN-YunxiNeural",     "label": "Azure · 云希 Yunxi (男) ⭐"},
     {"id": "azure:zh-CN-XiaoxiaoNeural",  "label": "Azure · 晓晓 Xiaoxiao (女) ⭐"},
     {"id": "azure:zh-CN-YunjianNeural",   "label": "Azure · 云健 Yunjian (男)"},
+    {"id": "azure:zh-CN-YunhaoNeural",    "label": "Azure · 云皓 Yunhao (男)"},
     {"id": "azure:zh-CN-XiaoyiNeural",    "label": "Azure · 晓伊 Xiaoyi (女)"},
     {"id": "azure:zh-TW-YunJheNeural",    "label": "Azure · 雲哲 YunJhe (男 台灣)"},
     {"id": "azure:zh-TW-HsiaoChenNeural", "label": "Azure · 曉臻 HsiaoChen (女 台灣)"},
@@ -408,4 +409,4 @@ def stt():
     return jsonify({"text": result["text"]})
 
 if __name__ == "__main__":
-    app.run(host="0.0.0.0", port=5050, debug=False)
+    app.run(host="0.0.0.0", port=5055, debug=False)
