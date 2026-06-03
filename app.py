@@ -42,7 +42,7 @@ VOICES = [
     {"id": "azure:zh-CN-YunjianNeural",   "label": "Azure · 云健 Yunjian (男)"},
     {"id": "azure:zh-CN-YunhaoNeural",    "label": "Azure · 云皓 Yunhao (男)"},
     {"id": "azure:zh-CN-YunxiaNeural",    "label": "Azure · 云夏 Yunxia (男)"},
-    {"id": "azure:zh-CN-YunhanNeural",    "label": "Azure · 云漢 Yunhan (男)"},
+    {"id": "azure:zh-CN-Yunhan:DragonHDFlashLatestNeural", "label": "Azure · 云漢 Yunhan HD (男) ⭐"},
     {"id": "azure:zh-CN-XiaoyiNeural",    "label": "Azure · 晓伊 Xiaoyi (女)"},
     {"id": "azure:zh-TW-YunJheNeural",    "label": "Azure · 雲哲 YunJhe (男 台灣)"},
     {"id": "azure:zh-TW-HsiaoChenNeural", "label": "Azure · 曉臻 HsiaoChen (女 台灣)"},
@@ -104,10 +104,48 @@ HTML = """<!DOCTYPE html>
       <input type="range" id="speed" min="0.5" max="2.0" step="0.05" value="1.0" style="flex:1; accent-color:#c9a227">
       <span id="speed-val" style="color:#c9a227; font-size:0.88rem; width:36px; text-align:right">1.0×</span>
     </div>
+    <!-- Input mode toggle -->
+    <div style="display:flex;gap:8px;margin:10px 0 6px;align-items:center">
+      <span style="color:#aaa;font-size:0.85rem">輸入模式:</span>
+      <label style="display:flex;align-items:center;gap:4px;cursor:pointer;font-size:0.85rem;color:#c9a227">
+        <input type="radio" name="input-mode" value="text" checked onchange="setInputMode('text')" style="accent-color:#c9a227"> 純文字
+      </label>
+      <label style="display:flex;align-items:center;gap:4px;cursor:pointer;font-size:0.85rem;color:#a78bfa">
+        <input type="radio" name="input-mode" value="xml" onchange="setInputMode('xml')" style="accent-color:#a78bfa"> 原始 SSML XML
+      </label>
+    </div>
     <textarea id="tts-text" placeholder="在這裡輸入普通話文字…&#10;Type Mandarin text here..."></textarea>
+    <textarea id="tts-xml" placeholder="貼上原始 SSML XML…&#10;e.g. <speak version='1.0' xmlns='...'><voice name='zh-CN-XiaoxiaoNeural'>你好</voice></speak>" style="display:none;font-family:monospace;font-size:0.82rem"></textarea>
+
+    <!-- SSML Style -->
+    <div id="ssml-style-row" style="margin:10px 0 4px;display:flex;align-items:center;gap:10px">
+      <label style="color:#aaa;font-size:0.85rem;white-space:nowrap">SSML 語氣 Style</label>
+      <select id="ssml-style" style="flex:1;padding:8px;font-size:0.85rem">
+        <option value="">— 無 / None —</option>
+        <option value="cheerful">cheerful 開朗</option>
+        <option value="sad">sad 悲傷</option>
+        <option value="angry">angry 憤怒</option>
+        <option value="fearful">fearful 恐懼</option>
+        <option value="whispering">whispering 低語</option>
+        <option value="newscast">newscast 播報</option>
+        <option value="newscast-casual">newscast-casual 輕鬆播報</option>
+        <option value="customerservice">customerservice 客服</option>
+        <option value="empathetic">empathetic 同理心</option>
+        <option value="gentle">gentle 溫和</option>
+        <option value="lyrical">lyrical 抒情</option>
+        <option value="serious">serious 嚴肅</option>
+      </select>
+    </div>
+
+    <!-- Lexicon -->
+    <div id="lexicon-row" style="margin:8px 0 4px">
+      <label style="color:#aaa;font-size:0.85rem;display:block;margin-bottom:4px">詞典 Lexicon <span style="color:#555;font-size:0.78rem">（每行 詞:讀音，如 旺角:Wòngkok）</span></label>
+      <textarea id="lexicon-text" placeholder="旺角:Wòngkok&#10;音樂:yīnyuè" style="min-height:60px;font-family:monospace;font-size:0.82rem"></textarea>
+    </div>
+
     <div class="row">
       <button class="btn-primary" onclick="doTTS()">🔊 生成語音</button>
-      <button class="btn-secondary" onclick="document.getElementById('tts-text').value=''">清除</button>
+      <button class="btn-secondary" onclick="clearTTS()">清除</button>
     </div>
     <div class="status" id="tts-status"></div>
     <audio id="tts-audio" controls style="display:none"></audio>
@@ -141,11 +179,45 @@ document.getElementById('speed').addEventListener('input', function() {
   document.getElementById('speed-val').textContent = parseFloat(this.value).toFixed(2).replace(/\.?0+$/, '') + '×';
 });
 
+let inputMode = 'text';
+function setInputMode(mode) {
+  inputMode = mode;
+  document.getElementById('tts-text').style.display = mode === 'text' ? '' : 'none';
+  document.getElementById('tts-xml').style.display = mode === 'xml' ? '' : 'none';
+  document.getElementById('ssml-style-row').style.display = mode === 'xml' ? 'none' : '';
+  document.getElementById('lexicon-row').style.display = mode === 'xml' ? 'none' : '';
+}
+function clearTTS() {
+  document.getElementById('tts-text').value = '';
+  document.getElementById('tts-xml').value = '';
+  document.getElementById('lexicon-text').value = '';
+  document.getElementById('ssml-style').value = '';
+}
+function parseLexicon() {
+  const raw = document.getElementById('lexicon-text').value.trim();
+  const lex = {};
+  raw.split(/\\r?\\n/).forEach(line => {
+    const idx = line.indexOf(':');
+    if (idx > 0) { lex[line.slice(0,idx).trim()] = line.slice(idx+1).trim(); }
+  });
+  return lex;
+}
+
 async function doTTS() {
-  const text = document.getElementById('tts-text').value.trim();
-  if (!text) { setStatus('tts', '請輸入文字', 'err'); return; }
   const voice = document.getElementById('voice').value;
   const speed = parseFloat(document.getElementById('speed').value);
+  let payload;
+  if (inputMode === 'xml') {
+    const raw_xml = document.getElementById('tts-xml').value.trim();
+    if (!raw_xml) { setStatus('tts', '請輸入 SSML XML', 'err'); return; }
+    payload = {raw_xml, voice, speed};
+  } else {
+    const text = document.getElementById('tts-text').value.trim();
+    if (!text) { setStatus('tts', '請輸入文字', 'err'); return; }
+    const ssml_style = document.getElementById('ssml-style').value;
+    const lexicon = parseLexicon();
+    payload = {text, voice, speed, ssml_style, lexicon};
+  }
   setStatus('tts', '⏳ 生成中，長文本需要稍等...', 'loading');
   document.querySelector('.btn-primary').disabled = true;
   try {
@@ -153,7 +225,7 @@ async function doTTS() {
     const r = await fetch('/tts', {
       method: 'POST',
       headers: {'Content-Type': 'application/json'},
-      body: JSON.stringify({text, voice, speed})
+      body: JSON.stringify(payload)
     });
     const d = await r.json();
     if (d.error) throw new Error(d.error);
@@ -302,7 +374,57 @@ def gtts_synthesize(text, lang_code, path):
     tld = "com.tw" if lang_code == "zh-TW" else "com"
     gTTS(text=text, lang="zh", tld=tld).save(path)
 
-def azure_synthesize(text, voice, path, speed=1.0):
+def build_lexicon_xml(lexicon: dict) -> str:
+    """Build an inline SSML lexicon block from {word: pronunciation} dict."""
+    if not lexicon:
+        return ""
+    items = ""
+    for word, pron in lexicon.items():
+        import html as _h
+        items += f'<lexeme><grapheme>{_h.escape(word)}</grapheme><phoneme>{_h.escape(pron)}</phoneme></lexeme>\n'
+    return f'<lexicon xml:id="lex1" alphabet="ipa">\n{items}</lexicon>\n'
+
+def apply_lexicon_lookup(text, lexicon: dict) -> str:
+    """Wrap lexicon words in <sub> tags for Edge TTS (no inline lexicon support)."""
+    if not lexicon:
+        return text
+    import re as _re, html as _h
+    for word, pron in lexicon.items():
+        text = _re.sub(
+            _re.escape(word),
+            f'<sub alias="{_h.escape(pron)}">{_h.escape(word)}</sub>',
+            text
+        )
+    return text
+
+async def edge_synthesize_ssml(text, voice, path, speed=1.0, ssml_style="", lexicon=None):
+    """Edge TTS with optional SSML style and lexicon substitutions."""
+    import html as _h
+    rate = f"{int((speed - 1.0) * 100):+d}%"
+    if lexicon:
+        text_inner = apply_lexicon_lookup(text, lexicon)
+    else:
+        text_inner = _h.escape(text)
+    style_open = f'<mstts:express-as style="{ssml_style}">' if ssml_style else ""
+    style_close = "</mstts:express-as>" if ssml_style else ""
+    ssml = f"""<speak version='1.0' xmlns='http://www.w3.org/2001/10/synthesis'
+  xmlns:mstts='http://www.w3.org/2001/mstts' xml:lang='zh-CN'>
+<voice name='{voice}'>
+<prosody rate='{rate}'>
+{style_open}{text_inner}{style_close}
+</prosody></voice></speak>"""
+    tmp = path + ".ssml_tmp.mp3"
+    try:
+        await asyncio.wait_for(
+            edge_tts.Communicate(ssml, voice, rate=rate).save(tmp),
+            timeout=60
+        )
+        os.rename(tmp, path)
+    except Exception:
+        # fallback: plain text
+        await edge_synthesize(text, voice, path, speed=speed)
+
+def azure_synthesize(text, voice, path, speed=1.0, ssml_style="", lexicon=None):
     import urllib.request, html as html_mod
     rate_pct = f"{int((speed - 1.0) * 100):+d}%"
     token_url = f"https://{AZURE_REGION}.api.cognitive.microsoft.com/sts/v1.0/issueToken"
@@ -310,8 +432,12 @@ def azure_synthesize(text, voice, path, speed=1.0):
 
     def _call(chunk):
         import urllib.request
-        ssml = f"""<speak version='1.0' xml:lang='zh-CN'>
-<voice name='{voice}'><prosody rate='{rate_pct}'>{html_mod.escape(chunk)}</prosody></voice>
+        chunk_inner = apply_lexicon_lookup(chunk, lexicon) if lexicon else html_mod.escape(chunk)
+        style_open = f'<mstts:express-as style="{ssml_style}">' if ssml_style else ""
+        style_close = "</mstts:express-as>" if ssml_style else ""
+        lex_xml = build_lexicon_xml(lexicon) if lexicon else ""
+        ssml = f"""<speak version='1.0' xmlns='http://www.w3.org/2001/10/synthesis' xmlns:mstts='http://www.w3.org/2001/mstts' xml:lang='zh-CN'>
+{lex_xml}<voice name='{voice}'><prosody rate='{rate_pct}'>{style_open}{chunk_inner}{style_close}</prosody></voice>
 </speak>"""
         token_req = urllib.request.Request(
             f"https://{AZURE_REGION}.api.cognitive.microsoft.com/sts/v1.0/issueToken",
@@ -350,15 +476,52 @@ def azure_synthesize(text, voice, path, speed=1.0):
         for chunk in chunks:
             f.write(_call(chunk))
 
+def azure_synthesize_raw_xml(ssml: str, path: str):
+    """Send raw SSML XML directly to Azure TTS endpoint."""
+    import urllib.request
+    AZURE_KEY = os.environ.get("AZURE_SPEECH_KEY", "")
+    AZURE_REGION = os.environ.get("AZURE_SPEECH_REGION", "eastasia")
+    if not AZURE_KEY:
+        raise RuntimeError("No AZURE_SPEECH_KEY set")
+    token_url = f"https://{AZURE_REGION}.api.cognitive.microsoft.com/sts/v1.0/issueToken"
+    token_req = urllib.request.Request(token_url, data=b"", headers={"Ocp-Apim-Subscription-Key": AZURE_KEY}, method="POST")
+    with urllib.request.urlopen(token_req, timeout=10) as resp:
+        token = resp.read().decode()
+    tts_url = f"https://{AZURE_REGION}.tts.speech.microsoft.com/cognitiveservices/v1"
+    req = urllib.request.Request(tts_url, data=ssml.encode("utf-8"), headers={
+        "Authorization": f"Bearer {token}",
+        "Content-Type": "application/ssml+xml",
+        "X-Microsoft-OutputFormat": "audio-16khz-128kbitrate-mono-mp3",
+        "User-Agent": "TtsApp",
+    })
+    with urllib.request.urlopen(req, timeout=60) as resp:
+        with open(path, "wb") as f:
+            f.write(resp.read())
+
+
+async def edge_synthesize_raw_xml(ssml: str, voice: str, path: str, speed: float = 1.0):
+    """Send raw SSML XML to Edge TTS (uses communicate with SSML passthrough)."""
+    import tempfile, shutil
+    rate = f"+{int((speed-1)*100)}%" if speed >= 1 else f"-{int((1-speed)*100)}%"
+    # Edge TTS Communicate accepts raw SSML when wrapped
+    tmp = path + ".raw_tmp.mp3"
+    await edge_tts.Communicate(ssml, voice, rate=rate).save(tmp)
+    shutil.move(tmp, path)
+
+
 @app.route("/tts", methods=["POST"])
 def tts():
     data = request.json
-    text = data.get("text", "").strip()
     voice = data.get("voice", "edge:zh-CN-XiaoxiaoNeural")
     speed = float(data.get("speed", 1.0))
     speed = max(0.5, min(2.0, speed))
-    if not text:
-        return jsonify({"error": "No text provided"})
+    ssml_style = data.get("ssml_style", "").strip()
+    lexicon = data.get("lexicon") or {}  # {word: pronunciation}
+    raw_xml = data.get("raw_xml", "").strip()  # raw SSML XML input
+
+    text = data.get("text", "").strip()
+    if not text and not raw_xml:
+        return jsonify({"error": "No text or XML provided"})
 
     job_id = uuid.uuid4().hex
     fname = f"{job_id}.mp3"
@@ -369,13 +532,22 @@ def tts():
 
     def run():
         try:
-            if engine == "gtts":
+            if raw_xml:
+                # Raw SSML XML mode — send directly to Azure; Edge TTS fallback via communicate
+                if engine == "azure":
+                    azure_synthesize_raw_xml(raw_xml, path)
+                else:
+                    asyncio.run(edge_synthesize_raw_xml(raw_xml, voice_id, path, speed=speed))
+            elif engine == "gtts":
                 gtts_synthesize(text, voice_id, path)
             elif engine == "azure":
-                azure_synthesize(text, voice_id, path, speed=speed)
+                azure_synthesize(text, voice_id, path, speed=speed, ssml_style=ssml_style, lexicon=lexicon)
             else:
                 try:
-                    asyncio.run(edge_synthesize(text, voice_id, path, speed=speed))
+                    if ssml_style or lexicon:
+                        asyncio.run(edge_synthesize_ssml(text, voice_id, path, speed=speed, ssml_style=ssml_style, lexicon=lexicon))
+                    else:
+                        asyncio.run(edge_synthesize(text, voice_id, path, speed=speed))
                 except Exception:
                     lang = "zh-TW" if "TW" in voice_id else "zh-CN"
                     gtts_synthesize(text, lang, path)
